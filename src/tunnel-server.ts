@@ -25,7 +25,6 @@ class TunnelServer {
     {
       resolve: (value: any) => void;
       reject: (reason: any) => void;
-      timeout: NodeJS.Timeout;
     }
   >();
 
@@ -141,7 +140,6 @@ class TunnelServer {
   private handleResponse(message: TunnelResponse) {
     const pending = this.pendingRequests.get(message.id);
     if (pending) {
-      clearTimeout(pending.timeout);
       this.pendingRequests.delete(message.id);
       pending.resolve(message);
     }
@@ -164,24 +162,16 @@ class TunnelServer {
 
       console.log(`🔄 Forwarding request: ${req.method} ${req.path}`);
 
-      // Set timeout for request
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(requestId);
-        reject(new Error("Request timeout"));
-      }, 60000); // Increased to 60 seconds
-
-      this.pendingRequests.set(requestId, { resolve, reject, timeout });
+      this.pendingRequests.set(requestId, { resolve, reject });
 
       try {
         client.ws.send(JSON.stringify(request), (error) => {
           if (error) {
-            clearTimeout(timeout);
             this.pendingRequests.delete(requestId);
             reject(new Error(`Failed to send request: ${error.message}`));
           }
         });
       } catch (error) {
-        clearTimeout(timeout);
         this.pendingRequests.delete(requestId);
         reject(error);
       }

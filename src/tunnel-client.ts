@@ -120,7 +120,6 @@ class TunnelClient {
         path: request.path,
         method: request.method,
         headers: request.headers,
-        timeout: 30000, // 30 second timeout
       };
 
       console.log(
@@ -168,11 +167,6 @@ class TunnelClient {
       req.on("error", (error) => {
         console.error("❌ Local server request error:", error.message);
         reject(error);
-      });
-
-      req.on("timeout", () => {
-        req.destroy();
-        reject(new Error("Local server request timeout"));
       });
 
       if (request.body) {
