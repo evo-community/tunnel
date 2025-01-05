@@ -120,20 +120,41 @@ class TunnelClient {
         path: request.path,
         method: request.method,
         headers: request.headers,
+        timeout: 30000, // 30 second timeout
       };
+
+      console.log(
+        "📡 Forwarding request to local server",
+        request.method,
+        request.path,
+        options
+      );
 
       const httpModule = this.localServerUrl.startsWith("https") ? https : http;
       const req = httpModule.request(options, (res) => {
-        console.log("res", res.statusCode, res.headers);
-        let body = "";
-        res.on("data", (chunk) => (body += chunk));
+        console.log("📥 Response headers:", res.statusCode, res.headers);
+        const chunks: Buffer[] = [];
+
+        res.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+
         res.on("end", () => {
+          const bodyBuffer = Buffer.concat(chunks);
+          let body: string | Buffer = bodyBuffer;
+
+          // Try to convert to string if it looks like text
+          const contentType = res.headers["content-type"] || "";
+          if (contentType.includes("json") || contentType.includes("text")) {
+            body = bodyBuffer.toString("utf-8");
+          }
+
           console.log(
             "📡 Received response from local server",
-            body,
-            res.headers,
-            res.statusCode
+            res.statusCode,
+            typeof body,
+            body.length,
+            "bytes"
           );
+
           resolve({
             type: "response",
             id: request.id,
@@ -145,7 +166,13 @@ class TunnelClient {
       });
 
       req.on("error", (error) => {
+        console.error("❌ Local server request error:", error.message);
         reject(error);
+      });
+
+      req.on("timeout", () => {
+        req.destroy();
+        reject(new Error("Local server request timeout"));
       });
 
       if (request.body) {
