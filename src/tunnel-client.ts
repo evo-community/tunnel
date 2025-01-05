@@ -19,10 +19,11 @@ class TunnelClient {
 
   public async connect() {
     try {
+      console.log("\n🔌 Connecting to tunnel server:", this.tunnelServerUrl);
       this.ws = new WebSocket(this.tunnelServerUrl);
       this.setupWebSocketHandlers();
     } catch (error) {
-      console.error("Failed to connect to tunnel server:", error);
+      console.error("\n❌ Failed to connect to tunnel server:", error);
       this.handleReconnect();
     }
   }
@@ -31,33 +32,42 @@ class TunnelClient {
     if (!this.ws) return;
 
     this.ws.on("open", () => {
-      console.log("🔌 Connected to tunnel server");
+      console.log("\n✅ Connected to tunnel server");
+      console.log("  URL:", this.tunnelServerUrl);
+      console.log("  Time:", new Date().toISOString());
       this.register();
       this.reconnectAttempts = 0;
     });
 
     this.ws.on("message", (data: string) => {
       try {
+        console.log("\n📥 Received WebSocket message:");
         const message: TunnelMessage = JSON.parse(data);
+        console.log("  Type:", message.type);
+        console.log("  Content:", JSON.stringify(message, null, 2));
         this.handleMessage(message);
       } catch (error) {
-        console.error("Error handling message:", error);
+        console.error("\n❌ Error handling WebSocket message:", error);
+        console.error("  Raw data:", data);
       }
     });
 
     this.ws.on("close", () => {
-      console.log("📴 Disconnected from tunnel server");
+      console.log("\n📴 Disconnected from tunnel server");
+      console.log("  Time:", new Date().toISOString());
       this.handleReconnect();
     });
 
     this.ws.on("error", (error) => {
-      console.error("WebSocket error:", error);
-      this.handleReconnect();
+      console.error("\n❌ WebSocket error:", error);
     });
   }
 
   private register() {
     if (!this.ws) return;
+
+    console.log("\n🔑 Registering with tunnel server:");
+    console.log("  Subdomain:", this.subdomain);
 
     const registration = {
       type: "register",
@@ -65,24 +75,31 @@ class TunnelClient {
       clientId: uuidv4(),
     };
 
+    console.log("  Registration data:", JSON.stringify(registration, null, 2));
     this.ws.send(JSON.stringify(registration));
   }
 
   private async handleMessage(message: TunnelMessage) {
+    console.log("\n📨 Processing message:", message.type);
+
     switch (message.type) {
       case "register_response":
         if (message.success) {
-          console.log(
-            `✅ Successfully registered with subdomain: ${this.subdomain}`
-          );
-          console.log(`🌍 Your server is accessible at: ${message.url}`);
+          console.log("\n✅ Registration successful:");
+          console.log("  Subdomain:", this.subdomain);
+          console.log("  Public URL:", message.url);
         } else {
-          console.error(`❌ Registration failed: ${message.message}`);
+          console.error("\n❌ Registration failed:");
+          console.error("  Reason:", message.message);
           process.exit(1);
         }
         break;
 
       case "request":
+        console.log("\n📥 Received request to forward:");
+        console.log("  ID:", message.id);
+        console.log("  Method:", message.method);
+        console.log("  Path:", message.path);
         await this.handleRequest(message as TunnelRequest);
         break;
     }
@@ -90,22 +107,37 @@ class TunnelClient {
 
   private async handleRequest(request: TunnelRequest) {
     try {
+      console.log("\n🔄 Forwarding request to local server:");
+      console.log("  ID:", request.id);
+      console.log("  Method:", request.method);
+      console.log("  Path:", request.path);
+      console.log("  Headers:", JSON.stringify(request.headers, null, 2));
+      console.log("  Body length:", request.body?.length || 0, "bytes");
+
       const response = await this.forwardRequestToLocalServer(request);
+      
+      console.log("\n📤 Sending response back to tunnel server:");
+      console.log("  ID:", response.id);
+      console.log("  Status:", response.statusCode);
+      console.log("  Headers:", JSON.stringify(response.headers, null, 2));
+      console.log("  Body length:", response.body?.length || 0, "bytes");
+
       if (this.ws) {
         this.ws.send(JSON.stringify(response));
+        console.log("✅ Response sent successfully");
       }
     } catch (error) {
-      console.error("Error forwarding request to local server:", error);
+      console.error("\n❌ Error handling request:", error);
       if (this.ws) {
-        this.ws.send(
-          JSON.stringify({
-            type: "response",
-            id: request.id,
-            statusCode: 500,
-            headers: { "content-type": "application/json" },
-            body: { error: "Internal server error" },
-          })
-        );
+        const errorResponse = {
+          type: "response",
+          id: request.id,
+          statusCode: 500,
+          headers: { "content-type": "application/json" },
+          body: { error: "Internal server error" },
+        };
+        console.log("📤 Sending error response:", errorResponse);
+        this.ws.send(JSON.stringify(errorResponse));
       }
     }
   }
@@ -122,37 +154,34 @@ class TunnelClient {
         headers: request.headers,
       };
 
-      console.log(
-        "📡 Forwarding request to local server",
-        request.method,
-        request.path,
-        options
-      );
+      console.log("\n📡 Creating request to local server:");
+      console.log("  URL:", `${this.localServerUrl}${request.path}`);
+      console.log("  Options:", JSON.stringify(options, null, 2));
 
       const httpModule = this.localServerUrl.startsWith("https") ? https : http;
       const req = httpModule.request(options, (res) => {
-        console.log("📥 Response headers:", res.statusCode, res.headers);
+        console.log("\n📥 Received response from local server:");
+        console.log("  Status:", res.statusCode);
+        console.log("  Headers:", JSON.stringify(res.headers, null, 2));
+
         const chunks: Buffer[] = [];
 
-        res.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        res.on("data", (chunk) => {
+          console.log("  Received chunk:", chunk.length, "bytes");
+          chunks.push(Buffer.from(chunk));
+        });
 
         res.on("end", () => {
           const bodyBuffer = Buffer.concat(chunks);
           let body: string | Buffer = bodyBuffer;
 
-          // Try to convert to string if it looks like text
           const contentType = res.headers["content-type"] || "";
           if (contentType.includes("json") || contentType.includes("text")) {
             body = bodyBuffer.toString("utf-8");
+            console.log("  Converted body to text (length):", body.length);
+          } else {
+            console.log("  Kept body as binary (length):", body.length);
           }
-
-          console.log(
-            "📡 Received response from local server",
-            res.statusCode,
-            typeof body,
-            body.length,
-            "bytes"
-          );
 
           resolve({
             type: "response",
@@ -165,13 +194,16 @@ class TunnelClient {
       });
 
       req.on("error", (error) => {
-        console.error("❌ Local server request error:", error.message);
+        console.error("\n❌ Local server request error:", error);
         reject(error);
       });
 
       if (request.body) {
+        console.log("  Writing request body:", request.body.length, "bytes");
         req.write(request.body);
       }
+
+      console.log("  Ending request");
       req.end();
     });
   }
@@ -180,14 +212,15 @@ class TunnelClient {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       console.log(
-        `🔄 Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`
+        `\n🔄 Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts}):`
       );
+      console.log("  Next attempt in:", this.reconnectDelay * this.reconnectAttempts, "ms");
       setTimeout(
         () => this.connect(),
         this.reconnectDelay * this.reconnectAttempts
       );
     } else {
-      console.error("❌ Max reconnection attempts reached. Exiting...");
+      console.error("\n❌ Max reconnection attempts reached. Exiting...");
       process.exit(1);
     }
   }
